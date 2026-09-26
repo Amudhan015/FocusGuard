@@ -9,6 +9,7 @@ import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/stats_screen.dart';
+import 'screens/timer_screen.dart';
 import 'services/app_preferences_service.dart';
 import 'services/database_service.dart';
 import 'theme/app_theme.dart';
@@ -29,7 +30,9 @@ class FocusGuardApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AppsProvider()),
-        ChangeNotifierProvider(create: (_) => SessionProvider()),
+        ChangeNotifierProvider(
+          create: (_) => SessionProvider()..restoreActiveSessionIfAny(),
+        ),
       ],
       child: MaterialApp(
         title: 'FocusGuard',
@@ -102,15 +105,23 @@ class _MainAppShellState extends State<MainAppShell> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Handle app lifecycle changes to prevent timer freezing
-    // Currently observing lifecycle events for future enhancements
-    // The timer implementation is already robust against backgrounding
+    if (state == AppLifecycleState.resumed) {
+      // Installed apps can change while FocusGuard is backgrounded
+      // (install/uninstall). Refresh so the Apps tab doesn't need a manual
+      // navigate-away-and-back to pick that up.
+      context.read<AppsProvider>().loadApps();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _screens[_selectedIndex],
+      body: Column(
+        children: [
+          Expanded(child: _screens[_selectedIndex]),
+          const _ActiveSessionReturnBar(),
+        ],
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
@@ -155,5 +166,65 @@ class _MainAppShellState extends State<MainAppShell> with WidgetsBindingObserver
     setState(() {
       _selectedIndex = index;
     });
+  }
+}
+
+/// Persistent, always-on-top-of-the-tabs bar that appears whenever a focus
+/// session is running or paused, no matter which tab you're on, and jumps
+/// straight back into it. Previously the only way back to an in-progress
+/// session was to trigger the "Start Focus Session" entry point again
+/// (which happened to show the active session instead of the setup form,
+/// but nothing signaled that) - there was no visible, obvious way to
+/// return to a session in progress.
+class _ActiveSessionReturnBar extends StatelessWidget {
+  const _ActiveSessionReturnBar();
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SessionProvider>(
+      builder: (context, provider, _) {
+        if (!provider.hasActiveSession) return const SizedBox.shrink();
+
+        final colorScheme = Theme.of(context).colorScheme;
+        final label = provider.isPaused
+            ? 'Session paused - tap to resume'
+            : '${provider.phaseLabel} in progress - tap to return';
+
+        return Material(
+          color: colorScheme.primary,
+          child: InkWell(
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TimerScreen()),
+              );
+            },
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Icon(
+                      provider.isPaused ? Icons.pause_circle_outline : Icons.play_circle_outline,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        label,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: Colors.white),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 }

@@ -30,7 +30,14 @@ class CameraCaptureScreen extends StatefulWidget {
 }
 
 class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
-  late CameraController _controller;
+  // Was `late CameraController _controller`, which is only ever assigned
+  // inside _initializeCamera() - i.e. only after camera permission was
+  // granted AND a camera was found. If the user denies permission, or the
+  // device reports no cameras, this field is never assigned, and
+  // dispose() unconditionally called _controller.dispose() - throwing a
+  // LateInitializationError the moment this screen was popped/backed out
+  // of from the permission-denied view.
+  CameraController? _controller;
   bool _isInitialized = false;
   bool _isPermissionGranted = false;
   bool _isCaptureInProgress = false;
@@ -45,7 +52,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
@@ -77,20 +84,24 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
         return;
       }
 
-      // Prefer back camera, fall back to first available.
-      // LensDirection.back has index 1.
-      final frontCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection.index == 1, // LensDirection.back
+      // Prefer the back camera, fall back to first available. Was matching
+      // on `lensDirection.index == 1`, which only happens to line up with
+      // CameraLensDirection.back today because of enum declaration order -
+      // comparing to the enum value directly is what's actually intended
+      // and doesn't silently break if that order ever changes.
+      final backCamera = cameras.firstWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
 
-      _controller = CameraController(
-        frontCamera,
+      final controller = CameraController(
+        backCamera,
         ResolutionPreset.medium,
         enableAudio: false,
       );
+      _controller = controller;
 
-      await _controller.initialize();
+      await controller.initialize();
       if (!mounted) return;
       setState(() {
         _isInitialized = true;
@@ -108,7 +119,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   }
 
   Future<void> _captureImage() async {
-    if (!_isInitialized || !_controller.value.isInitialized) {
+    if (!_isInitialized || _controller == null || !_controller!.value.isInitialized) {
       setState(() => _error = 'Camera not initialized');
       return;
     }
@@ -117,7 +128,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     _error = null;
 
     try {
-      final XFile file = await _controller.takePicture();
+      final XFile file = await _controller!.takePicture();
       final String path = file.path;
 
       // Notify parent with captured image path.
@@ -185,7 +196,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     return Stack(
       children: [
         // Camera preview
-        CameraPreview(_controller),
+        CameraPreview(_controller!),
         // Overlay UI
         Column(
           mainAxisAlignment: MainAxisAlignment.end,

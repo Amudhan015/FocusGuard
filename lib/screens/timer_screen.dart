@@ -6,6 +6,7 @@ import '../models/focus_session.dart';
 import '../models/session_template.dart';
 import '../providers/session_provider.dart';
 import '../repositories/templates_repository.dart';
+import '../services/app_preferences_service.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/template_card.dart';
@@ -37,6 +38,19 @@ class _TimerScreenState extends State<TimerScreen> {
   void initState() {
     super.initState();
     _templatesRepository.init();
+    _loadDefaultsFromSettings();
+  }
+
+  // Settings > Defaults (Default Mode, Default Focus Time) were being
+  // saved by SettingsScreen but never read anywhere - this screen always
+  // hardcoded Pomodoro/25 min regardless of what the user configured.
+  Future<void> _loadDefaultsFromSettings() async {
+    final prefs = await AppPreferencesService.instance.getPreferences();
+    if (!mounted) return;
+    setState(() {
+      _selectedMode = prefs.defaultMode;
+      _focusMinutes = prefs.defaultFocusMinutes;
+    });
   }
 
   @override
@@ -266,12 +280,14 @@ class _TimerScreenState extends State<TimerScreen> {
         longBreakMinutes: template.longBreakMinutes,
         sessionsBeforeLongBreak: template.sessionsBeforeLongBreak,
         subjectTag: template.subjectTag,
+        intentionText: template.intentionText,
         templateId: template.id,
       );
     } else {
       await provider.startDeepFocus(
         minutes: template.focusMinutes,
         subjectTag: template.subjectTag,
+        intentionText: template.intentionText,
         templateId: template.id,
       );
     }
@@ -506,18 +522,31 @@ class _ActiveSessionView extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                IconButton(
-                  icon: Icon(
-                    provider.isPaused ? Icons.play_arrow : Icons.pause,
-                    size: 36,
-                  ),
-                  onPressed: provider.isPaused ? provider.resumeSession : provider.pauseSession,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+                // Per SessionStatus.paused's own documented design,
+                // pausing is only meant to be available in Deep Focus -
+                // Pomodoro is meant to auto-transition through its phases
+                // instead. The button used to show unconditionally for
+                // both modes even though the model didn't actually intend
+                // that.
+                if (provider.canPause)
+                  IconButton(
+                    icon: Icon(
+                      provider.isPaused ? Icons.play_arrow : Icons.pause,
+                      size: 36,
+                    ),
+                    onPressed: provider.isPaused ? provider.resumeSession : provider.pauseSession,
+                    color: Theme.of(context).colorScheme.primary,
+                  )
+                else
+                  const SizedBox(width: 48),
                 ElevatedButton.icon(
-                  onPressed: () => _confirmEndEarly(context, provider),
+                  // Strict Mode (Settings > Strict Mode): once running,
+                  // commit to the session - no ending early.
+                  onPressed: provider.strictModeEnabled
+                      ? null
+                      : () => _confirmEndEarly(context, provider),
                   icon: const Icon(Icons.stop_circle_outlined, size: 20),
-                  label: const Text('End Early'),
+                  label: Text(provider.strictModeEnabled ? 'Strict Mode: locked in' : 'End Early'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.error,
                     foregroundColor: Colors.white,

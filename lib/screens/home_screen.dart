@@ -3,8 +3,10 @@ import '../theme/app_theme.dart';
 import '../widgets/glass_app_bar.dart';
 import '../screens/timer_screen.dart';
 import '../services/database_service.dart';
+import '../services/app_preferences_service.dart';
 import '../models/enums.dart';
 import '../models/focus_session.dart';
+import '../utils/streak_calculator.dart';
 
 /// Home screen - serves as the main dashboard showing today's focus stats
 /// and providing quick access to start a session.
@@ -17,15 +19,23 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _todaySessions = 0;
-  double _todayHours = 1.0;
+  double _todayHours = 0.0;
   int _currentStreak = 0;
   List<FocusSession> _recentSessions = [];
+  bool _use24HourFormat = true;
 
   @override
   void initState() {
     super.initState();
     _updateTodayStats();
     _loadRecentSessions();
+    _loadTimeFormatPreference();
+  }
+
+  Future<void> _loadTimeFormatPreference() async {
+    final prefs = await AppPreferencesService.instance.getPreferences();
+    if (!mounted) return;
+    setState(() => _use24HourFormat = prefs.use24HourFormat);
   }
 
   Future<void> _updateTodayStats() async {
@@ -40,39 +50,22 @@ class _HomeScreenState extends State<HomeScreen> {
           session.status == SessionStatus.closed;
     }).toList();
 
-    final todaySeconds = todaySessions.fold(0, (sum, session) =>
-        sum + (session.endTime?.difference(session.startTime).inSeconds ?? 0));
+    // Use actualDurationMinutes (the timer's own tracked focus time)
+    // rather than endTime - startTime: the latter is wall-clock time and
+    // for Pomodoro sessions includes break time, and for any paused
+    // session includes idle paused time, both of which overstate how much
+    // was actually focused.
+    final todayMinutes =
+        todaySessions.fold(0, (sum, session) => sum + session.actualDurationMinutes);
 
-    // Calculate streak (simplified - consecutive days with at least one session)
-    final allSessions = db.getAllSessions().where((s) => s.status == SessionStatus.closed).toList();
-    allSessions.sort((a, b) => b.startTime.compareTo(a.startTime));
-
-    int streak = 0;
-    DateTime? lastSessionDate;
-
-    for (final session in allSessions) {
-      final sessionDate = DateTime(session.startTime.year, session.startTime.month, session.startTime.day);
-      if (lastSessionDate == null) {
-        lastSessionDate = sessionDate;
-        streak = 1;
-        continue;
-      }
-
-      final yesterday = lastSessionDate.subtract(const Duration(days: 1));
-      if (sessionDate.isAtSameMomentAs(yesterday)) {
-        streak++;
-        lastSessionDate = sessionDate;
-      } else if (!sessionDate.isAtSameMomentAs(lastSessionDate)) {
-        break;
-      }
-    }
+    final streak = StreakCalculator.calculate(db.getAllSessions());
 
     if (!mounted) return;
 
     setState(() {
       _todaySessions = todaySessions.length;
-      _todayHours = todaySeconds / 3600;
-      _currentStreak = streak;
+      _todayHours = todayMinutes / 60;
+      _currentStreak = streak.currentStreak;
     });
   }
 
@@ -113,8 +106,14 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: SafeArea(
+        top: false,
         child: Column(
           children: [
+            // GlassAppBar is translucent and floats over the body
+            // (extendBodyBehindAppBar: true) - without this spacer, the
+            // stats header rendered underneath/behind the blurred bar
+            // instead of below it.
+            SizedBox(height: kToolbarHeight + MediaQuery.of(context).padding.top),
             // Today's stats header
             _buildTodayStats(context),
             const SizedBox(height: AppSpacing.lg),
@@ -281,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
-              '${_formatDuration(session.endTime?.difference(session.startTime) ?? Duration.zero)} • ${_formatTime(session.startTime)}',
+              '${_formatDuration(Duration(minutes: session.actualDurationMinutes))} • ${_formatTime(session.startTime)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             if (session.selfRating != null) ...[
@@ -318,6 +317,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _formatTime(DateTime dateTime) {
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    if (_use24HourFormat) {
+      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    }
+    final hour12 = dateTime.hour % 12 == 0 ? 12 : dateTime.hour % 12;
+    final period = dateTime.hour >= 12 ? 'PM' : 'AM';
+    return '$hour12:${dateTime.minute.toString().padLeft(2, '0')} $period';
   }
 }

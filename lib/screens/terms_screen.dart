@@ -8,15 +8,21 @@ class TermsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
       extendBodyBehindAppBar: true,
-      appBar: GlassAppBar(
+      appBar: const GlassAppBar(
         title: 'Terms of Service',
       ),
       body: SafeArea(
+        top: false,
         child: SingleChildScrollView(
-          padding: EdgeInsets.all(AppSpacing.lg),
-          child: Text(
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            kToolbarHeight + MediaQuery.of(context).padding.top + AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+          ),
+          child: const Text(
             'TERMS OF SERVICE\n\n'
             'Last updated: September 13, 2026\n\n'
             '1. ACCEPTANCE OF TERMS\n'

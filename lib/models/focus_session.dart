@@ -43,6 +43,11 @@ class FocusSession extends HiveObject {
   String? photoPath;
   bool isGalleryFallbackPhoto;
   bool isDuplicatePhoto;
+  // Was referenced everywhere (constructor, toJson, the Hive adapter,
+  // and SessionProvider's pause/resume logic) but never actually
+  // declared as a field on this class - that's an undefined-field/getter/
+  // setter compile error in every one of those places.
+  int elapsedSecondsInCurrentPhase;
   final List<EscapeAttempt> escapeAttempts;
   final List<PhonePickupEvent> phonePickups;
   final String? templateId;

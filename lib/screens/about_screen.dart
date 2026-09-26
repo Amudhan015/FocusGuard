@@ -14,8 +14,14 @@ class AboutScreen extends StatelessWidget {
         title: 'About FocusGuard',
       ),
       body: SafeArea(
+        top: false,
         child: ListView(
-          padding: const EdgeInsets.all(AppSpacing.lg),
+          padding: EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            kToolbarHeight + MediaQuery.of(context).padding.top + AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+          ),
           children: const [
             Center(
               child:  Icon(

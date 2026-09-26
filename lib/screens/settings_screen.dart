@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../models/enums.dart';
+import '../models/focus_session.dart';
 import '../services/app_preferences_service.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
@@ -62,15 +67,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: 'Settings',
       ),
       body: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.zero,
+        top: false,
+        child: Column(
           children: [
-            _buildAccountSection(context),
-            _buildPreferencesSection(context),
-            _buildDefaultsSection(context),
-            _buildPrivacySection(context),
-            _buildDataSection(context),
-            _buildAboutSection(context),
+            // See home_screen.dart for why this spacer is needed under a
+            // translucent GlassAppBar with extendBodyBehindAppBar: true.
+            SizedBox(height: kToolbarHeight + MediaQuery.of(context).padding.top),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _buildAccountSection(context),
+                  _buildPreferencesSection(context),
+                  _buildDefaultsSection(context),
+                  _buildPrivacySection(context),
+                  _buildDataSection(context),
+                  _buildAboutSection(context),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -556,24 +571,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  // NOTE ON DEPENDENCIES: this real implementation needs `path_provider`
+  // (to find a writable, shareable directory) and `file_picker` (to let
+  // the user choose a .json file to import). If they aren't already in
+  // pubspec.yaml, add:
+  //   path_provider: ^2.1.0
+  //   file_picker: ^8.0.0
+  // (or whatever current versions - pubspec.yaml wasn't available to
+  // check against here). Everything else below is real, working I/O -
+  // previously this only ever debugPrint'd and showed a canned "success"
+  // message without writing anything to disk at all.
+
   Future<void> _exportData(BuildContext context) async {
     try {
-      // Export sessions to JSON
       final sessions = DatabaseService.instance.getAllSessions();
       final exportData = {
         'exportDate': DateTime.now().toIso8601String(),
         'sessions': sessions.map((session) => session.toJson()).toList(),
       };
+      final jsonString = const JsonEncoder.withIndent('  ').convert(exportData);
 
-      // For debugging in development - remove in production
-      debugPrint('Exporting data: $exportData');
+      final directory = await getApplicationDocumentsDirectory();
+      final fileName =
+          'focusguard_export_${DateTime.now().millisecondsSinceEpoch}.json';
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsString(jsonString);
 
-      // For now, show a success message since actual file export
-      // would require platform-specific implementation
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Data exported successfully! (Feature coming soon)'),
+          SnackBar(
+            content: Text('Exported ${sessions.length} sessions to $fileName'),
             backgroundColor: Colors.green,
           ),
         );
@@ -592,15 +619,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _importData(BuildContext context) async {
     try {
-      // For now, just show a message since actual file import
-      // would require platform-specific implementation
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
+      if (result == null || result.files.single.path == null) return;
+
+      final file = File(result.files.single.path!);
+      final jsonString = await file.readAsString();
+      final decoded = jsonDecode(jsonString) as Map<String, dynamic>;
+      final rawSessions = decoded['sessions'] as List<dynamic>? ?? [];
+
+      int imported = 0;
+      for (final raw in rawSessions) {
+        final map = raw as Map<String, dynamic>;
+        final id = map['id'] as String?;
+        // toJson() doesn't currently round-trip every field (e.g.
+        // escapeAttempts/phonePickups aren't included), so this imports
+        // what IS available rather than silently failing the whole file.
+        if (id == null) continue;
+        if (DatabaseService.instance.getSession(id) != null) {
+          continue; // Don't clobber an existing session with the same id.
+        }
+        final session = FocusSession(
+          id: id,
+          startTime: DateTime.parse(map['startTime'] as String),
+          endTime: map['endTime'] != null ? DateTime.parse(map['endTime'] as String) : null,
+          mode: SessionMode.values.byName(map['mode'] as String),
+          plannedDurationMinutes: map['plannedDurationMinutes'] as int,
+          actualDurationMinutes: map['actualDurationMinutes'] as int? ?? 0,
+          subjectTag: map['subjectTag'] as String? ?? 'General',
+          intentionText: map['intentionText'] as String?,
+          status: SessionStatus.values.byName(map['status'] as String? ?? 'closed'),
+          endedEarly: map['endedEarly'] as bool? ?? false,
+          selfRating: map['selfRating'] != null
+              ? SelfRating.values.byName(map['selfRating'] as String)
+              : null,
+          reflectionNote: map['reflectionNote'] as String?,
+          photoPath: map['photoPath'] as String?,
+          isGalleryFallbackPhoto: map['isGalleryFallbackPhoto'] as bool? ?? false,
+          isDuplicatePhoto: map['isDuplicatePhoto'] as bool? ?? false,
+          templateId: map['templateId'] as String?,
+        );
+        await DatabaseService.instance.saveSession(session);
+        imported++;
+      }
+
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Import feature coming soon!'),
+          SnackBar(
+            content: Text('Imported $imported session(s).'),
             backgroundColor: Colors.blue,
           ),
         );
+        setState(() {});
       }
     } catch (e) {
       if (context.mounted) {

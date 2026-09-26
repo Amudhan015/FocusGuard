@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/enums.dart';
 import '../models/focus_session.dart';
+import '../services/app_preferences_service.dart';
 import '../services/database_service.dart';
 import '../screens/timer_screen.dart';
 import '../theme/app_theme.dart';
@@ -22,11 +23,19 @@ class _HistoryScreenState extends State<HistoryScreen> {
   String _searchQuery = '';
   String _selectedFilter = 'All'; // All, Completed, Early Ended
   List<FocusSession> _sessions = [];
+  bool _use24HourFormat = true;
 
   @override
   void initState() {
     super.initState();
     _loadSessions();
+    _loadTimeFormatPreference();
+  }
+
+  Future<void> _loadTimeFormatPreference() async {
+    final prefs = await AppPreferencesService.instance.getPreferences();
+    if (!mounted) return;
+    setState(() => _use24HourFormat = prefs.use24HourFormat);
   }
 
   void _loadSessions() {
@@ -38,11 +47,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   .toLowerCase()
                   .contains(_searchQuery.toLowerCase()) &&
               (_selectedFilter == 'All' ||
+                  // Was checking status == closed for BOTH 'Completed' and
+                  // 'Early Ended', with the actual endedEarly check
+                  // literally stubbed out as `true` - so 'Early Ended'
+                  // just showed the same results as 'Completed'.
                   (_selectedFilter == 'Completed' &&
-                      session.status == SessionStatus.closed) ||
-                  (_selectedFilter == 'Early Ended' &&
                       session.status == SessionStatus.closed &&
-                      /* would need to check if ended early */ true)))
+                      !session.endedEarly) ||
+                  (_selectedFilter == 'Early Ended' && session.endedEarly)))
           .toList()
         ..sort((a, b) => b.startTime.compareTo(a.startTime)); // Most recent first
     });
@@ -68,9 +80,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
         ],
       ),
       body: SafeArea(
-        child: _sessions.isEmpty
-            ? _buildEmptyState(context)
-            : _buildSessionList(context),
+        top: false,
+        child: Column(
+          children: [
+            // See home_screen.dart for why this spacer is needed under a
+            // translucent GlassAppBar with extendBodyBehindAppBar: true.
+            SizedBox(height: kToolbarHeight + MediaQuery.of(context).padding.top),
+            Expanded(
+              child: _sessions.isEmpty ? _buildEmptyState(context) : _buildSessionList(context),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -207,19 +227,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   String _formatTime(DateTime dateTime) {
-    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    if (_use24HourFormat) {
+      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+    }
+    final hour12 = dateTime.hour % 12 == 0 ? 12 : dateTime.hour % 12;
+    final period = dateTime.hour >= 12 ? 'PM' : 'AM';
+    return '$hour12:${dateTime.minute.toString().padLeft(2, '0')} $period';
   }
 
   Duration getSessionDuration(FocusSession session) {
-    if (session.endTime != null) {
-      return session.endTime!.difference(session.startTime);
-    } else if (session.status == SessionStatus.active) {
-      // For active sessions, calculate duration so far
+    // actualDurationMinutes is the timer's own tracked focused time.
+    // endTime - startTime is wall-clock time, which for Pomodoro sessions
+    // includes break time and for paused sessions includes idle paused
+    // time - both overstated how long was actually spent focused.
+    if (session.status == SessionStatus.active) {
       return DateTime.now().difference(session.startTime);
-    } else {
-      // For completed sessions without end time, estimate or return zero
-      return Duration.zero;
     }
+    return Duration(minutes: session.actualDurationMinutes);
   }
 
   void _showSearchDialog(BuildContext context) {

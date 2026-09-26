@@ -8,11 +8,23 @@ import '../models/enums.dart';
 import '../models/escape_attempt.dart';
 import '../models/focus_session.dart';
 import '../models/phone_pickup_event.dart';
+import '../services/app_preferences_service.dart';
 import '../services/database_service.dart';
 import '../services/native_bridge_service.dart';
 import 'dart:developer';
 
 class SessionProvider extends ChangeNotifier {
+  SessionProvider() {
+    // Wire up notification action taps (pause/resume/stop) coming back
+    // from the native side, if/when the native notification supports
+    // them. Safe to call even if the native side never sends anything.
+    NativeBridgeService.instance.setNotificationActionHandler(
+      onPause: pauseSession,
+      onResume: resumeSession,
+      onStop: () => endSessionEarly(),
+    );
+  }
+
   FocusSession? _session;
   PomodoroPhase? _phase;
   Timer? _ticker;
@@ -22,6 +34,7 @@ class SessionProvider extends ChangeNotifier {
   int _longBreakMinutes = 15;
   int _sessionsBeforeLongBreak = 4;
   int _completedFocusPhasesInSet = 0;
+  bool _strictModeEnabled = false;
   // Elapsed seconds in current phase is stored in the session object
 // as elapsedSecondsInCurrentPhase to survive app restarts
 
@@ -33,6 +46,15 @@ class SessionProvider extends ChangeNotifier {
   PomodoroPhase? get currentPhase => _phase;
   bool get hasActiveSession => _session != null;
   bool get isPaused => _session?.status == SessionStatus.paused;
+  // Strict Mode (Settings > Strict Mode): once a session is running, you
+  // commit to it - no ending early. Pausing is still governed separately
+  // by mode (see canPause below).
+  bool get strictModeEnabled => _strictModeEnabled;
+  // Per the SessionStatus.paused doc comment, pausing is only meant to be
+  // available in Deep Focus - Pomodoro is supposed to auto-transition
+  // through its phases instead. The UI should hide the pause control when
+  // this is false.
+  bool get canPause => _session?.mode == SessionMode.deepFocus;
 
   Duration get remaining {
     if (_phaseEndTime == null) return Duration.zero;
@@ -62,6 +84,42 @@ class SessionProvider extends ChangeNotifier {
 
   bool get _isCurrentPhaseFocus =>
       _session?.mode == SessionMode.deepFocus || _phase == PomodoroPhase.focus;
+
+  /// Best-effort restore of a session that got left `active`/`paused` in
+  /// the database - typically because Android killed the app process
+  /// while a session was running, which otherwise makes the session
+  /// invisible to the UI forever (no way to "return" to it) even though
+  /// it's still sitting there unfinished.
+  ///
+  /// We deliberately always bring it back *paused* rather than trying to
+  /// resume a live countdown: the exact Pomodoro phase/config in progress
+  /// at the moment the process died isn't persisted, so silently
+  /// continuing a countdown could show the wrong remaining time. Coming
+  /// back paused is honest about that and lets the user Resume (which
+  /// recalculates remaining time from what IS known) or End Early.
+  Future<void> restoreActiveSessionIfAny() async {
+    if (_session != null) return;
+    final dangling = DatabaseService.instance.getAllSessions().where(
+          (s) => s.status == SessionStatus.active || s.status == SessionStatus.paused,
+        );
+    if (dangling.isEmpty) return;
+
+    final restored = dangling.first;
+    _session = restored;
+    _phase = restored.mode == SessionMode.pomodoro ? PomodoroPhase.focus : null;
+    _focusMinutes = restored.plannedDurationMinutes;
+    _completedFocusSeconds = restored.actualDurationMinutes * 60;
+    _phaseStartTime = null;
+    _phaseEndTime = null;
+
+    restored.status = SessionStatus.paused;
+    await DatabaseService.instance.saveSession(restored);
+
+    final prefs = await AppPreferencesService.instance.getPreferences();
+    _strictModeEnabled = prefs.strictModeEnabled;
+
+    notifyListeners();
+  }
 
   Future<void> startDeepFocus({
     required int minutes,
@@ -135,6 +193,8 @@ class SessionProvider extends ChangeNotifier {
     _session!.actualDurationMinutes = 0;
 
     await Permission.notification.request();
+    final prefs = await AppPreferencesService.instance.getPreferences();
+    _strictModeEnabled = prefs.strictModeEnabled;
 
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
@@ -224,17 +284,24 @@ class SessionProvider extends ChangeNotifier {
     if (_session == null) return;
     final mode = _session!.mode;
 
+    // Use the time actually elapsed since this phase last (re)started,
+    // not the nominal planned length. Using the planned length
+    // unconditionally double-counted focus time whenever a phase had been
+    // paused and resumed earlier (pauseSession() already banks the
+    // elapsed-so-far seconds; adding the full planned duration on top of
+    // that on natural completion counted part of the phase twice).
+    final int elapsedSeconds =
+        _phaseStartTime != null ? DateTime.now().difference(_phaseStartTime!).inSeconds : 0;
+
     if (mode == SessionMode.deepFocus) {
-      final focusSeconds = _session!.plannedDurationMinutes * 60;
-      _completedFocusSeconds += focusSeconds;
+      _completedFocusSeconds += elapsedSeconds;
       _session!.actualDurationMinutes = (_completedFocusSeconds / 60).round();
       await _completeSession(endedEarly: false);
       return;
     }
 
     if (_phase == PomodoroPhase.focus) {
-      final focusSeconds = _focusMinutes * 60;
-      _completedFocusSeconds += focusSeconds;
+      _completedFocusSeconds += elapsedSeconds;
       _session!.actualDurationMinutes = (_completedFocusSeconds / 60).round();
       _completedFocusPhasesInSet++;
       await _playPhaseTransitionCue();
@@ -321,8 +388,12 @@ class SessionProvider extends ChangeNotifier {
     }
 
     final elapsedSeconds = _session?.elapsedSecondsInCurrentPhase ?? 0;
-    final remainingSeconds =
-        (totalSecondsForPhase - elapsedSeconds).clamp(1, totalSecondsForPhase);
+    // num.clamp() returns num even when called on an int with int bounds,
+    // and Duration(seconds: ...) below requires an int - this was already
+    // present in the original code and would have failed the same way
+    // once the elapsedSecondsInCurrentPhase field errors above were fixed.
+    final int remainingSeconds =
+        (totalSecondsForPhase - elapsedSeconds).clamp(1, totalSecondsForPhase).toInt();
 
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
     await _beginPhase(
@@ -333,7 +404,13 @@ class SessionProvider extends ChangeNotifier {
 
   Future<void> endSessionEarly() async {
     if (_session == null) return;
-    if (_isCurrentPhaseFocus && _phaseStartTime != null) {
+    // If the session is currently paused, pauseSession() already banked
+    // everything elapsed up to the pause into _completedFocusSeconds -
+    // _phaseStartTime still points at when the (now-paused) phase
+    // originally started, so adding "now - phaseStartTime" here again
+    // would both double-count that segment AND wrongly count the entire
+    // paused/idle waiting time as focused time.
+    if (!isPaused && _isCurrentPhaseFocus && _phaseStartTime != null) {
       final elapsedSeconds = DateTime.now().difference(_phaseStartTime!).inSeconds;
       _completedFocusSeconds += elapsedSeconds;
       _session!.actualDurationMinutes = (_completedFocusSeconds / 60).round();
@@ -362,7 +439,6 @@ class SessionProvider extends ChangeNotifier {
     _phase = null;
     _phaseEndTime = null;
     _phaseStartTime = null;
-    _elapsedSecondsInCurrentPhase = 0;
     notifyListeners();
   }
 

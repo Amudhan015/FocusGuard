@@ -74,25 +74,33 @@ class AppsProvider extends ChangeNotifier {
     String? note,
   }) async {
     final resolvedNote = isBlocked && (note != null && note.isNotEmpty) ? note : null;
+    final updated = app.copyWith(
+      isBlocked: isBlocked,
+      blockNote: resolvedNote,
+      clearBlockNote: resolvedNote == null,
+    );
+
+    // Update in-memory state FIRST. _syncNativeBridge() below reads the
+    // current blocked list straight off `_allApps` - syncing before this
+    // update meant the app you'd just toggled was never actually included
+    // in the list sent to the native side (it only showed up on the NEXT
+    // toggle of any app), so blocking/unblocking effectively took one
+    // extra action to "take". This is why toggling e.g. one specific app
+    // and testing it immediately looked like blocking "didn't work" for
+    // that app.
+    _replaceApp(updated);
 
     try {
-      // Sync with native bridge first
-      await _syncNativeBridge();
-      // Then update local state and database
       await DatabaseService.instance.setBlocked(
         app.packageName,
         isBlocked: isBlocked,
         blockNote: resolvedNote,
       );
-      _replaceApp(
-        app.copyWith(
-          isBlocked: isBlocked,
-          blockNote: resolvedNote,
-          clearBlockNote: resolvedNote == null,
-        ),
-      );
+      await _syncNativeBridge();
     } catch (e) {
-      // If sync fails, do not update local state
+      // Roll back the optimistic update so the UI doesn't claim a state
+      // that was never actually persisted/synced.
+      _replaceApp(app);
       rethrow;
     }
   }

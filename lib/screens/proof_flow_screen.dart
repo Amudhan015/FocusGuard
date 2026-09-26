@@ -23,9 +23,18 @@ class ProofFlowScreen extends StatelessWidget {
         value: SessionProofController.instance,
         child: Consumer<SessionProofController>(
           builder: (context, proofController, _) {
-            // Start the proof flow when the screen is first shown.
+            // Start the proof flow when the screen is first shown for this
+            // session. SessionProofController is a singleton reused across
+            // every session's proof flow, so checking `state == active`
+            // here was wrong: after session A's flow finished, `state`
+            // was left at `closed` (not reset), so opening this screen for
+            // a brand new session B never called startProofFlow at all -
+            // the switch below just fell straight into the `closed` case
+            // and showed "Proof saved successfully!" for a session that
+            // was never actually captured. Compare on sessionId instead,
+            // which correctly detects "this is a different session".
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (proofController.state == SessionStatus.active) {
+              if (proofController.sessionId != sessionId) {
                 proofController.startProofFlow(sessionId);
               }
             });

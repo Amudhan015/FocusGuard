@@ -102,14 +102,22 @@ class _AppsScreenState extends State<AppsScreen> {
   ) async {
     HapticFeedback.selectionClick();
 
-    if (!turningOn) {
-      await provider.setBlocked(app, isBlocked: false);
-      return;
-    }
+    try {
+      if (!turningOn) {
+        await provider.setBlocked(app, isBlocked: false);
+        return;
+      }
 
-    final note = await BlockNoteDialog.show(context, appName: app.appName);
-    if (note == null) return;
-    await provider.setBlocked(app, isBlocked: true, note: note);
+      final note = await BlockNoteDialog.show(context, appName: app.appName);
+      if (note == null) return;
+      await provider.setBlocked(app, isBlocked: true, note: note);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update blocking for ${app.appName}.')),
+        );
+      }
+    }
   }
 
   Future<void> _handleEditNote(
@@ -117,13 +125,21 @@ class _AppsScreenState extends State<AppsScreen> {
     AppsProvider provider,
     AppListItem app,
   ) async {
-    final note = await BlockNoteDialog.show(
-      context,
-      appName: app.appName,
-      initialNote: app.blockNote,
-    );
-    if (note == null) return;
-    await provider.setBlocked(app, isBlocked: true, note: note);
+    try {
+      final note = await BlockNoteDialog.show(
+        context,
+        appName: app.appName,
+        initialNote: app.blockNote,
+      );
+      if (note == null) return;
+      await provider.setBlocked(app, isBlocked: true, note: note);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update blocking for ${app.appName}.')),
+        );
+      }
+    }
   }
 
   Future<void> _handleCategoryTap(

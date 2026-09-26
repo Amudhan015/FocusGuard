@@ -45,6 +45,7 @@ class _UsageScreenState extends State<UsageScreen> {
         title: 'Usage Statistics',
       ),
       body: SafeArea(
+        top: false,
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : _error.isNotEmpty
@@ -52,7 +53,12 @@ class _UsageScreenState extends State<UsageScreen> {
                 : _usageStats.isEmpty
                     ? const Center(child: Text('No usage data available'))
                     : ListView(
-                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        padding: EdgeInsets.fromLTRB(
+                          AppSpacing.lg,
+                          kToolbarHeight + MediaQuery.of(context).padding.top + AppSpacing.lg,
+                          AppSpacing.lg,
+                          AppSpacing.lg,
+                        ),
                         children: [
                           const Text(
                             'Today\'s App Usage',

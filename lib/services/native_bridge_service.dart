@@ -39,6 +39,35 @@ class NativeBridgeService {
 
   static const MethodChannel _channel = MethodChannel('com.focusguard/native_bridge');
 
+  /// Registers a handler for calls initiated FROM native code, e.g. the
+  /// user tapping Pause/Resume/Stop actions on the foreground-service
+  /// notification. Requires the native side to add those actions to the
+  /// notification and invoke the method channel with one of
+  /// 'notificationPauseTapped' / 'notificationResumeTapped' /
+  /// 'notificationStopTapped' when tapped - that part is native Android
+  /// work (a NotificationCompat.Action + PendingIntent/BroadcastReceiver)
+  /// that isn't in this Dart codebase. This just makes sure the Flutter
+  /// side is ready to react the moment that native support exists.
+  void setNotificationActionHandler({
+    required VoidCallback onPause,
+    required VoidCallback onResume,
+    required VoidCallback onStop,
+  }) {
+    _channel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'notificationPauseTapped':
+          onPause();
+          break;
+        case 'notificationResumeTapped':
+          onResume();
+          break;
+        case 'notificationStopTapped':
+          onStop();
+          break;
+      }
+    });
+  }
+
   Future<void> syncBlockedApps({
     required List<String> packages,
     required Map<String, String> notes,

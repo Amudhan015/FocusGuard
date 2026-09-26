@@ -19,10 +19,14 @@ class PermissionScreen extends StatelessWidget {
           title: 'App Permissions',
         ),
         body: SafeArea(
+          top: false,
           child: Consumer<OnboardingProvider>(
             builder: (context, provider, _) {
               final steps = provider.permissionSteps;
               return ListView(
+                padding: EdgeInsets.only(
+                  top: kToolbarHeight + MediaQuery.of(context).padding.top,
+                ),
                 children: [
                   for (final step in steps)
                     PermissionTile(

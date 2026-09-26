@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/permission_info.dart';
 import '../services/native_bridge_service.dart';
@@ -101,8 +102,18 @@ class OnboardingProvider extends ChangeNotifier {
             'access for that.',
         icon: Icons.camera_alt_outlined,
         isCritical: false,
-        checkGranted: bridge.isCameraPermissionGranted,
-        requestGrant: bridge.requestCameraPermission,
+        // Was routed through NativeBridgeService's own custom
+        // isCameraPermissionGranted/requestCameraPermission native-bridge
+        // calls, while the actual capture screen (camera_capture_screen.dart)
+        // checks/requests camera permission through permission_handler's
+        // Permission.camera. Two separate permission mechanisms for the
+        // same OS permission could easily disagree (onboarding shows
+        // "granted" while the camera screen still thinks it isn't, or vice
+        // versa) - use the same one everywhere.
+        checkGranted: () async => (await Permission.camera.status).isGranted,
+        requestGrant: () async {
+          await Permission.camera.request();
+        },
       ),
     ];
   }

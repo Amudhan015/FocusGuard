@@ -4,6 +4,7 @@ import '../models/enums.dart';
 import '../models/focus_session.dart';
 import '../services/database_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/streak_calculator.dart';
 import '../widgets/glass_app_bar.dart';
 import '../screens/timer_screen.dart';
 
@@ -55,11 +56,21 @@ class _StatsScreenState extends State<StatsScreen> {
         title: 'Stats',
       ),
       body: SafeArea(
-        child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : _sessions.isEmpty
-                ? _buildEmptyState(context)
-                : _buildStatsContent(context),
+        top: false,
+        child: Column(
+          children: [
+            // See home_screen.dart for why this spacer is needed under a
+            // translucent GlassAppBar with extendBodyBehindAppBar: true.
+            SizedBox(height: kToolbarHeight + MediaQuery.of(context).padding.top),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _sessions.isEmpty
+                      ? _buildEmptyState(context)
+                      : _buildStatsContent(context),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -287,62 +298,19 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   Widget _buildStreakStats(BuildContext context) {
-    // Calculate streak stats directly from sessions
-    final closedSessions = _sessions.where((s) => s.status == SessionStatus.closed).toList();
-    closedSessions.sort((a, b) => b.startTime.compareTo(a.startTime)); // Newest first
+    // Was duplicated (and buggy - it never checked whether the most recent
+    // session was actually today/yesterday before reporting a streak) here
+    // and in home_screen.dart. Now both use the single, correct
+    // StreakCalculator implementation.
+    final streak = StreakCalculator.calculate(_sessions);
+    final currentStreak = streak.currentStreak;
+    final longestStreak = streak.longestStreak;
+    final perfectWeeks = StreakCalculator.perfectWeeks(_sessions);
 
-    int currentStreak = 0;
-    int longestStreak = 0;
-    int perfectWeeks = 0;
-    int sessionsThisWeek = 0;
-
-    if (closedSessions.isNotEmpty) {
-      // Calculate current and longest streak
-      DateTime? lastSessionDate;
-      int currentStreakTemp = 0;
-
-      for (final session in closedSessions) {
-        final sessionDate = DateTime(session.startTime.year, session.startTime.month, session.startTime.day);
-
-        if (lastSessionDate == null) {
-          lastSessionDate = sessionDate;
-          currentStreakTemp = 1;
-          continue;
-        }
-
-        final yesterday = lastSessionDate.subtract(const Duration(days: 1));
-        if (sessionDate.isAtSameMomentAs(yesterday)) {
-          currentStreakTemp++;
-          if (currentStreakTemp > longestStreak) {
-            longestStreak = currentStreakTemp;
-          }
-        } else if (!sessionDate.isAtSameMomentAs(lastSessionDate)) {
-          // Streak broken
-          if (currentStreakTemp > longestStreak) {
-            longestStreak = currentStreakTemp;
-          }
-          currentStreakTemp = 1;
-          lastSessionDate = sessionDate;
-          continue;
-        }
-
-        lastSessionDate = sessionDate;
-      }
-
-      // Handle the case where the streak is still going
-      if (currentStreakTemp > longestStreak) {
-        longestStreak = currentStreakTemp;
-      }
-      currentStreak = currentStreakTemp;
-
-      // Calculate sessions this week
-      final weekAgo = DateTime.now().subtract(const Duration(days: 7));
-      sessionsThisWeek = closedSessions.where((s) => s.startTime.isAfter(weekAgo)).length;
-
-      // Calculate perfect weeks (weeks with at least one session every day)
-      // This is a simplified version - in a real app you'd want to track this properly
-      perfectWeeks = 0; // Placeholder - would require more complex tracking
-    }
+    final weekAgo = DateTime.now().subtract(const Duration(days: 7));
+    final sessionsThisWeek = _sessions
+        .where((s) => s.status == SessionStatus.closed && s.startTime.isAfter(weekAgo))
+        .length;
 
     return Card(
       elevation: 0,
@@ -667,14 +635,14 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   Duration getSessionDuration(FocusSession session) {
-    if (session.endTime != null) {
-      return session.endTime!.difference(session.startTime);
-    } else if (session.status == SessionStatus.active) {
-      // For active sessions, calculate duration so far
+    // actualDurationMinutes is the timer's own tracked focused time.
+    // endTime - startTime is wall-clock time, which for Pomodoro sessions
+    // includes break time and for paused sessions includes idle paused
+    // time - both overstate how long was actually spent focused, which
+    // made every duration shown in Stats (and History/Home) inflated.
+    if (session.status == SessionStatus.active) {
       return DateTime.now().difference(session.startTime);
-    } else {
-      // For completed sessions without end time, estimate or return zero
-      return Duration.zero;
     }
+    return Duration(minutes: session.actualDurationMinutes);
   }
 }
