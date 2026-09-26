@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="block_overlay_title">%1$s is blocked right now</string>
+    <string name="block_overlay_remaining">%1$d:%2$02d left in this session</string>
+    <string name="block_overlay_open_focusguard">Open FocusGuard</string>
+    <string name="accessibility_service_description">Lets FocusGuard detect when a blocked app is opened during a focus session, so it can show the block screen. FocusGuard does not read on-screen content - it only checks which app is in the foreground.</string>
+</resources>

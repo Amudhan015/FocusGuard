@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#0F1117"
+    android:padding="32dp">
+
+    <TextView
+        android:id="@+id/blockedAppNameText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#F3F4F7"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/blockNoteText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#9CA3AF"
+        android:textSize="16sp"
+        android:gravity="center"
+        android:layout_marginBottom="24dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp" />
+
+    <TextView
+        android:id="@+id/remainingTimeText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#8C99FF"
+        android:textSize="40sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="40dp" />
+
+    <Button
+        android:id="@+id/openFocusGuardButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/block_overlay_open_focusguard"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp" />
+
+</LinearLayout>
