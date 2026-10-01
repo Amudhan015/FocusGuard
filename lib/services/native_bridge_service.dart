@@ -260,11 +260,13 @@ class NativeBridgeService {
   Future<void> startForegroundNotification({
     required DateTime endTime,
     required String label,
+    bool isPaused = false,
   }) async {
     try {
       await _channel.invokeMethod<void>('startForegroundNotification', {
         'endTimeMillis': endTime.millisecondsSinceEpoch,
         'label': label,
+        'isPaused': isPaused,
       });
     } catch (e, stack) {
       log('Failed to start foreground notification: $e', error: e, stackTrace: stack);

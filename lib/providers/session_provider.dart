@@ -46,6 +46,15 @@ class SessionProvider extends ChangeNotifier {
   PomodoroPhase? get currentPhase => _phase;
   bool get hasActiveSession => _session != null;
   bool get isPaused => _session?.status == SessionStatus.paused;
+  // One-shot signal for "a session just finished and needs its photo +
+  // rating". Previously nothing navigated to ProofFlowScreen when a
+  // session actually completed (naturally or via End Early) - the user
+  // was just dropped back on the setup screen and had to notice a small
+  // pending-closure banner themselves. The UI layer (see main.dart)
+  // watches this, navigates, then calls clearPendingProofNotice().
+  String? _pendingProofSessionId;
+  String? get pendingProofSessionId => _pendingProofSessionId;
+  void clearPendingProofNotice() => _pendingProofSessionId = null;
   // Strict Mode (Settings > Strict Mode): once a session is running, you
   // commit to it - no ending early. Pausing is still governed separately
   // by mode (see canPause below).
@@ -346,7 +355,14 @@ class SessionProvider extends ChangeNotifier {
 
     _ticker?.cancel();
     await NativeBridgeService.instance.endSession();
-    await NativeBridgeService.instance.stopForegroundNotification();
+    // Was stopForegroundNotification() - removed the notification
+    // entirely while paused, which meant there was nothing for a Resume
+    // button to live on. Keep it, in a paused state, instead.
+    await NativeBridgeService.instance.startForegroundNotification(
+      endTime: _phaseEndTime ?? DateTime.now(),
+      label: _session?.subjectTag ?? 'Focus session',
+      isPaused: true,
+    );
 
     _session!.status = SessionStatus.paused;
     await DatabaseService.instance.saveSession(_session!);
@@ -439,6 +455,7 @@ class SessionProvider extends ChangeNotifier {
     _phase = null;
     _phaseEndTime = null;
     _phaseStartTime = null;
+    _pendingProofSessionId = activeSession.id;
     notifyListeners();
   }
 

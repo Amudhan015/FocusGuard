@@ -42,10 +42,28 @@ object Constants {
     const val ACTION_STOP_FOREGROUND_SESSION = "com.focusguard.action.STOP_FOREGROUND_SESSION"
     const val EXTRA_FOREGROUND_END_MILLIS = "extra_foreground_end_millis"
     const val EXTRA_FOREGROUND_LABEL = "extra_foreground_label"
+    // NEW: whether the session is currently paused - the notification
+    // shows a different (non-counting) state and different action buttons
+    // when paused vs running.
+    const val EXTRA_FOREGROUND_IS_PAUSED = "extra_foreground_is_paused"
     const val NOTIFICATION_CHANNEL_ID = "focusguard_session_channel"
     const val NOTIFICATION_ID = 4201
-    // How often the notification text refreshes. Not every second - that
-    // would be a battery/notification-spam concern for no real benefit
-    // during a 25-90 minute session.
-    const val FOREGROUND_UPDATE_INTERVAL_MILLIS = 30_000L
+    // Was "how often the notification text refreshes" at 30s - that WAS
+    // the bug behind the timer mismatch (see SessionForegroundService).
+    // The countdown is now rendered by the OS itself via
+    // setUsesChronometer/setChronometerCountDown, which needs no polling
+    // at all and can't drift. This interval is now only used as a safety
+    // net to self-stop the service if Dart ever fails to call
+    // stopForegroundNotification (e.g. after a crash).
+    const val FOREGROUND_SAFETY_CHECK_INTERVAL_MILLIS = 60_000L
+
+    // --- Notification action buttons (Pause / Resume / Stop) ---
+    // MainActivity relays these to Dart over METHOD_CHANNEL as
+    // 'notificationPauseTapped' / 'notificationResumeTapped' /
+    // 'notificationStopTapped', which SessionProvider is already
+    // listening for (see NativeBridgeService.setNotificationActionHandler
+    // on the Dart side).
+    const val ACTION_NOTIFICATION_PAUSE = "com.focusguard.action.NOTIFICATION_PAUSE"
+    const val ACTION_NOTIFICATION_RESUME = "com.focusguard.action.NOTIFICATION_RESUME"
+    const val ACTION_NOTIFICATION_STOP = "com.focusguard.action.NOTIFICATION_STOP"
 }

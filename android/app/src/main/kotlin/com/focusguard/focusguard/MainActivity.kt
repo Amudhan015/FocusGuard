@@ -10,11 +10,18 @@ class MainActivity : FlutterActivity() {
 
     private lateinit var prefsStore: PrefsStore
 
+    // Was a local `val` inside configureFlutterEngine - needed as a field
+    // now so onNewIntent (notification button taps) can also invoke
+    // methods on it, not just the setMethodCallHandler side.
+    private var channel: MethodChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         prefsStore = PrefsStore(this)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, Constants.METHOD_CHANNEL)
+        val methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, Constants.METHOD_CHANNEL)
+        channel = methodChannel
+        methodChannel
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     // --- App state sync (Dart -> native) ---
@@ -118,10 +125,15 @@ class MainActivity : FlutterActivity() {
                             ?: (call.argument<Int>("endTimeMillis")?.toLong())
                             ?: 0L
                         val label = call.argument<String>("label") ?: "Focus session"
+                        // NEW: lets the notification show a Paused state
+                        // (with a Resume action) instead of disappearing
+                        // entirely while a session is paused.
+                        val isPaused = call.argument<Boolean>("isPaused") ?: false
                         val serviceIntent = Intent(this, SessionForegroundService::class.java).apply {
                             action = Constants.ACTION_START_FOREGROUND_SESSION
                             putExtra(Constants.EXTRA_FOREGROUND_END_MILLIS, endTimeMillis)
                             putExtra(Constants.EXTRA_FOREGROUND_LABEL, label)
+                            putExtra(Constants.EXTRA_FOREGROUND_IS_PAUSED, isPaused)
                         }
                         startForegroundService(serviceIntent)
                         result.success(null)
@@ -138,5 +150,38 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Handle the case where this Activity is being created FRESH (cold
+        // start / process was killed) directly from a notification button
+        // tap, rather than reached via onNewIntent below.
+        handleNotificationActionIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // MainActivity is launchMode="singleTop", so tapping a Pause/
+        // Resume/Stop action while the app is already running (even just
+        // backgrounded, not killed) arrives here instead of recreating
+        // the Activity - this is what lets us relay the tap to the
+        // already-running Dart session without disturbing it.
+        setIntent(intent)
+        handleNotificationActionIntent(intent)
+    }
+
+    private fun handleNotificationActionIntent(intent: Intent?) {
+        val method = when (intent?.action) {
+            Constants.ACTION_NOTIFICATION_PAUSE -> "notificationPauseTapped"
+            Constants.ACTION_NOTIFICATION_RESUME -> "notificationResumeTapped"
+            Constants.ACTION_NOTIFICATION_STOP -> "notificationStopTapped"
+            else -> null
+        } ?: return
+
+        // SessionProvider registers its handler for these on Dart's side
+        // as soon as the app starts (see
+        // NativeBridgeService.setNotificationActionHandler), so by the
+        // time the user can tap a notification action a session must
+        // already be running - the channel should be ready.
+        channel?.invokeMethod(method, null)
+        Log.i("FocusGuard", "Notification action relayed to Dart: $method")
     }
 }

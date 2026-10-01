@@ -1,11 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import '../models/enums.dart';
 import '../models/focus_session.dart';
-import '../providers/session_provider.dart';
 import '../providers/session_proof_controller.dart';
 import '../services/database_service.dart';
 import '../screens/proof_flow_screen.dart';
@@ -42,13 +40,27 @@ class SessionDetailScreen extends StatelessWidget {
   }
 }
 
-class _SessionDetailContent extends StatelessWidget {
+class _SessionDetailContent extends StatefulWidget {
   const _SessionDetailContent({
     required this.sessionId,
   });
 
   final String sessionId;
 
+  @override
+  State<_SessionDetailContent> createState() => _SessionDetailContentState();
+}
+
+// Was a StatelessWidget wrapped in Consumer<SessionProvider> - that
+// provider has nothing to do with viewing a past session's details, and
+// only notifies listeners while some OTHER session is actively ticking.
+// That meant this screen only ever picked up an edited rating/note or a
+// re-captured photo by accident, when a live timer happened to be
+// running elsewhere at the same time - normally (no session currently
+// active) a save here was invisible until you left and came back. A
+// plain State + setState() after each save is what was actually needed,
+// and it also stops rebuilding this screen every second for no reason.
+class _SessionDetailContentState extends State<_SessionDetailContent> {
   Future<void> _editRatingAndNote(BuildContext context) async {
     final result = await Navigator.of(context).push<Map<String, dynamic>?>(
       MaterialPageRoute(
@@ -66,42 +78,40 @@ class _SessionDetailContent extends StatelessWidget {
     if (result != null) {
       final rating = result['rating'] as SelfRating?;
       final note = result['note'] as String?;
-      final session = DatabaseService.instance.getSession(sessionId);
+      final session = DatabaseService.instance.getSession(widget.sessionId);
       if (session != null) {
         session.selfRating = rating;
         session.reflectionNote = note;
-        await DatabaseService.instance.saveSession(session); // This will update the Hive box and notify listeners.
+        await DatabaseService.instance.saveSession(session);
       }
+      if (mounted) setState(() {});
     }
   }
 
   Future<void> _reproofSession(BuildContext context) async {
     final proofController = SessionProofController.instance;
-    await proofController.startProofFlow(sessionId);
+    await proofController.startProofFlow(widget.sessionId);
     if (context.mounted) {
-      Navigator.of(context).push(
+      await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => ProofFlowScreen(sessionId: sessionId),
+          builder: (_) => ProofFlowScreen(sessionId: widget.sessionId),
         ),
       );
+      if (mounted) setState(() {});
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<SessionProvider>(
-      builder: (context, provider, _) {
-        final session = DatabaseService.instance.getSession(sessionId);
-        if (session == null) {
-          return const Center(child: Text('Session not found'));
-        }
+    final session = DatabaseService.instance.getSession(widget.sessionId);
+    if (session == null) {
+      return const Center(child: Text('Session not found'));
+    }
 
-        return _SessionDetailBody(
-          session: session,
-          onEditRatingAndNote: _editRatingAndNote,
-          onReproofSession: _reproofSession,
-        );
-      },
+    return _SessionDetailBody(
+      session: session,
+      onEditRatingAndNote: _editRatingAndNote,
+      onReproofSession: _reproofSession,
     );
   }
 }

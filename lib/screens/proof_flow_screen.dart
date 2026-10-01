@@ -40,7 +40,11 @@ class ProofFlowScreen extends StatelessWidget {
             });
 
             return _ProofFlowBody(
-              key: key,
+              // Was `key: key`, reusing ProofFlowScreen's own key on its
+              // child for no reason - harmless most of the time, but
+              // meaningless here and a GlobalKey landmine if this screen
+              // is ever given one. _ProofFlowBody doesn't need identity
+              // preservation of its own.
               proofController: proofController,
               onFlowCompleted: () => Navigator.of(context).pop(),
             );

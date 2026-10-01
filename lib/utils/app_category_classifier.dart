@@ -109,7 +109,12 @@ class AppCategoryClassifier {
     MapEntry('poker', AppCategory.games),
     MapEntry('chess', AppCategory.games),
     MapEntry('efootball', AppCategory.games),
-    MapEntry('pes', AppCategory.games),
+    // Removed a bare 'pes' rule that used to be here: com.konami.pesam and
+    // com.konami.efootball are already matched explicitly above, and
+    // 'pes' as a substring is far too short/broad for a plain contains()
+    // check - it would false-positive on any unrelated package that
+    // happens to contain those three letters (e.g. something to do with
+    // "expenses", "properties", "types" ...).
     MapEntry('fifa', AppCategory.games),
     MapEntry('cricket', AppCategory.games),
     MapEntry('football', AppCategory.games),
